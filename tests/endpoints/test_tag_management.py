@@ -1,13 +1,18 @@
 """Tests for GET /info/tags and POST /info/tags endpoints."""
 
 from http import HTTPStatus
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
+from trustyai_service.endpoints import metadata as metadata_endpoint
 from trustyai_service.endpoints import routes
 from trustyai_service.main import app
+from trustyai_service.service.constants import METADATA_SUFFIX
+from trustyai_service.service.data.storage.pvc import PVCStorage
 
 client = TestClient(app)
 
@@ -37,6 +42,30 @@ def _make_metadata_rows(
 
 
 METADATA_NAMES = ["id", "iso_time", "unix_timestamp", "tags"]
+
+
+@pytest.mark.asyncio
+async def test_persist_metadata_uses_storage_column_name_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PVC-backed tag persistence uses the storage interface's column-name API."""
+    storage = PVCStorage(str(tmp_path))
+    model_id = "pvc-model"
+    metadata_dataset = model_id + METADATA_SUFFIX
+    original = _make_metadata_rows(2)
+    updated = _make_metadata_rows(2, [["TRAINING"], ["_trustyai_unlabeled"]])
+
+    await storage.write_data(metadata_dataset, original, METADATA_NAMES)
+    monkeypatch.setattr(metadata_endpoint, "storage_interface", storage)
+
+    await metadata_endpoint._persist_metadata(model_id, updated, METADATA_NAMES)
+
+    assert (
+        list(await storage.get_original_column_names(metadata_dataset))
+        == METADATA_NAMES
+    )
+    assert (await storage.read_data(metadata_dataset)).tolist() == updated.tolist()
 
 
 def _mock_model_data(metadata: np.ndarray) -> MagicMock:
@@ -173,7 +202,7 @@ class TestApplyTags:
         # Configure storage_interface for model existence check and persistence
         mock_storage.dataset_exists = AsyncMock(return_value=True)
         mock_storage.read_data = AsyncMock(return_value=_make_metadata_rows(10))
-        mock_storage.read_column_names = AsyncMock(return_value=METADATA_NAMES)
+        mock_storage.get_original_column_names = AsyncMock(return_value=METADATA_NAMES)
         mock_storage.delete_dataset = AsyncMock()
         mock_storage.write_data = AsyncMock()
 
@@ -260,7 +289,7 @@ class TestApplyTags:
         metadata = _make_metadata_rows(3, [["TRAINING"]] * 3)
         mock_storage.dataset_exists = AsyncMock(return_value=True)
         mock_storage.read_data = AsyncMock(return_value=_make_metadata_rows(10))
-        mock_storage.read_column_names = AsyncMock(return_value=METADATA_NAMES)
+        mock_storage.get_original_column_names = AsyncMock(return_value=METADATA_NAMES)
         mock_storage.delete_dataset = AsyncMock()
 
         written_data: dict[str, np.ndarray] = {}
@@ -382,7 +411,7 @@ class TestApplyTags:
 
         mock_storage.dataset_exists = AsyncMock(return_value=True)
         mock_storage.read_data = AsyncMock(return_value=_make_metadata_rows(10))
-        mock_storage.read_column_names = AsyncMock(return_value=METADATA_NAMES)
+        mock_storage.get_original_column_names = AsyncMock(return_value=METADATA_NAMES)
         mock_storage.delete_dataset = AsyncMock()
 
         written_data: dict[str, np.ndarray] = {}
@@ -426,7 +455,7 @@ class TestApplyTags:
 
         mock_storage.dataset_exists = AsyncMock(return_value=True)
         mock_storage.read_data = AsyncMock(return_value=_make_metadata_rows(10))
-        mock_storage.read_column_names = AsyncMock(return_value=METADATA_NAMES)
+        mock_storage.get_original_column_names = AsyncMock(return_value=METADATA_NAMES)
         mock_storage.delete_dataset = AsyncMock()
 
         written_data: dict[str, np.ndarray] = {}
@@ -477,7 +506,7 @@ class TestApplyTags:
 
         mock_storage.dataset_exists = AsyncMock(return_value=True)
         mock_storage.read_data = AsyncMock(return_value=_make_metadata_rows(10))
-        mock_storage.read_column_names = AsyncMock(return_value=METADATA_NAMES)
+        mock_storage.get_original_column_names = AsyncMock(return_value=METADATA_NAMES)
         mock_storage.delete_dataset = AsyncMock()
 
         written_data: dict[str, np.ndarray] = {}
@@ -524,7 +553,7 @@ class TestApplyTags:
 
         mock_storage.dataset_exists = AsyncMock(return_value=True)
         mock_storage.read_data = AsyncMock(return_value=_make_metadata_rows(10))
-        mock_storage.read_column_names = AsyncMock(return_value=METADATA_NAMES)
+        mock_storage.get_original_column_names = AsyncMock(return_value=METADATA_NAMES)
         mock_storage.delete_dataset = AsyncMock()
 
         written_data: dict[str, np.ndarray] = {}
