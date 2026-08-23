@@ -814,7 +814,7 @@ async def _persist_metadata(
             # Read and backup current metadata before deletion
             backup_data = await storage_interface.read_data(metadata_dataset)
             backup_names = list(
-                await storage_interface.read_column_names(metadata_dataset)
+                await storage_interface.get_original_column_names(metadata_dataset)
             )
             await storage_interface.delete_dataset(metadata_dataset)
 
