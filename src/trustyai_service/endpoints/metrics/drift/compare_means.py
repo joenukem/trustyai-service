@@ -207,9 +207,10 @@ async def get_compare_means_definition() -> dict[str, str]:
     }
 
 
-@router.post(routes.DRIFT_COMPARE_MEANS.request)
-async def schedule_compare_means(request: CompareMeansMetricRequest) -> dict[str, str]:
-    """Schedule a recurring computation of CompareMeans metric."""
+async def _schedule_compare_means(
+    request: CompareMeansMetricRequest, metric_name: str
+) -> dict[str, str]:
+    """Schedule CompareMeans calculations under the requested API metric name."""
     # Get the scheduler and validate availability
     scheduler = get_prometheus_scheduler()
     if not scheduler:
@@ -224,10 +225,10 @@ async def schedule_compare_means(request: CompareMeansMetricRequest) -> dict[str
     try:
         # Generate UUID for this request
         request_id = uuid.uuid4()
-        logger.info("Scheduling %s computation with ID: %s.", METRIC_NAME, request_id)
+        logger.info("Scheduling %s computation with ID: %s.", metric_name, request_id)
 
         # Set metric name automatically
-        request.metric_name = METRIC_NAME
+        request.metric_name = metric_name
 
         # Register with the scheduler (this will reconcile the request and store it)
         await scheduler.register(request.metric_name, request_id, request)
@@ -235,21 +236,28 @@ async def schedule_compare_means(request: CompareMeansMetricRequest) -> dict[str
     except HTTPException:
         raise
     except Exception as e:  # Broad catch intentional: scheduler registration errors should not crash endpoint
-        logger.exception("Error scheduling %s computation", METRIC_NAME)
+        logger.exception("Error scheduling %s computation", metric_name)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Error scheduling metric. Check server logs for details.",
         ) from e
     else:
         logger.info(
-            "Successfully scheduled %s computation with ID: %s", METRIC_NAME, request_id
+            "Successfully scheduled %s computation with ID: %s", metric_name, request_id
         )
         return {"requestId": str(request_id)}
 
 
-@router.delete(routes.DRIFT_COMPARE_MEANS.request)
-async def delete_compare_means_schedule(schedule: ScheduleId) -> dict[str, str]:
-    """Delete a recurring computation of CompareMeans metric."""
+@router.post(routes.DRIFT_COMPARE_MEANS.request)
+async def schedule_compare_means(request: CompareMeansMetricRequest) -> dict[str, str]:
+    """Schedule a recurring computation of CompareMeans metric."""
+    return await _schedule_compare_means(request, METRIC_NAME)
+
+
+async def _delete_compare_means_schedule(
+    schedule: ScheduleId, metric_name: str
+) -> dict[str, str]:
+    """Delete a recurring CompareMeans calculation by API metric name."""
     # Get the scheduler and validate availability
     scheduler = get_prometheus_scheduler()
     if not scheduler:
@@ -267,24 +275,24 @@ async def delete_compare_means_schedule(schedule: ScheduleId) -> dict[str, str]:
         ) from e
 
     try:
-        logger.info("Deleting %s schedule: %s", METRIC_NAME, schedule.requestId)
+        logger.info("Deleting %s schedule: %s", metric_name, schedule.requestId)
 
         # Delete from scheduler
-        await scheduler.delete(METRIC_NAME, request_uuid)
+        await scheduler.delete(metric_name, request_uuid)
 
     except HTTPException:
         raise
     except (
         Exception
     ) as e:  # Broad catch intentional: endpoint catch-all for unknown deletion errors
-        logger.exception("Error deleting %s schedule", METRIC_NAME)
+        logger.exception("Error deleting %s schedule", metric_name)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Error deleting schedule. Check server logs for details.",
         ) from e
     else:
         logger.info(
-            "Successfully deleted %s schedule: %s", METRIC_NAME, schedule.requestId
+            "Successfully deleted %s schedule: %s", metric_name, schedule.requestId
         )
         return {
             "status": "success",
@@ -292,9 +300,16 @@ async def delete_compare_means_schedule(schedule: ScheduleId) -> dict[str, str]:
         }
 
 
-@router.get(routes.DRIFT_COMPARE_MEANS.requests)
-async def list_compare_means_requests() -> dict[str, list[dict[str, Any]]]:
-    """List the currently scheduled computations of CompareMeans metric."""
+@router.delete(routes.DRIFT_COMPARE_MEANS.request)
+async def delete_compare_means_schedule(schedule: ScheduleId) -> dict[str, str]:
+    """Delete a recurring computation of CompareMeans metric."""
+    return await _delete_compare_means_schedule(schedule, METRIC_NAME)
+
+
+async def _list_compare_means_requests(
+    metric_name: str,
+) -> dict[str, list[dict[str, Any]]]:
+    """List recurring CompareMeans calculations by API metric name."""
     # Get the scheduler and validate availability
     scheduler = get_prometheus_scheduler()
     if not scheduler:
@@ -304,8 +319,8 @@ async def list_compare_means_requests() -> dict[str, list[dict[str, Any]]]:
         )
 
     try:
-        # Get all requests for CompareMeans
-        requests = scheduler.get_requests(METRIC_NAME)
+        # Get all requests for the canonical or backwards-compatible API name
+        requests = scheduler.get_requests(metric_name)
 
         # Convert to list format expected by client
         requests_list = []
@@ -322,7 +337,7 @@ async def list_compare_means_requests() -> dict[str, list[dict[str, Any]]]:
                         "id": str(request_id),  # deprecated: use requestId
                         "requestId": str(request_id),
                         "modelId": request.model_id,
-                        "metricName": METRIC_NAME,
+                        "metricName": metric_name,
                         "batchSize": request.batch_size,
                         "referenceTag": request.reference_tag,
                         "fitColumns": request.fit_columns,
@@ -335,7 +350,7 @@ async def list_compare_means_requests() -> dict[str, list[dict[str, Any]]]:
                 # Log warning for malformed request objects and skip them
                 logger.warning(
                     "Skipping malformed %s request %s: missing required attributes",
-                    METRIC_NAME,
+                    metric_name,
                     request_id,
                 )
                 continue
@@ -345,13 +360,19 @@ async def list_compare_means_requests() -> dict[str, list[dict[str, Any]]]:
     except (
         Exception
     ) as e:  # Broad catch intentional: endpoint catch-all for unknown listing errors
-        logger.exception("Error listing %s requests", METRIC_NAME)
+        logger.exception("Error listing %s requests", metric_name)
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
             detail="Error listing requests. Check server logs for details.",
         ) from e
     else:
         return {"requests": requests_list}
+
+
+@router.get(routes.DRIFT_COMPARE_MEANS.requests)
+async def list_compare_means_requests() -> dict[str, list[dict[str, Any]]]:
+    """List the currently scheduled computations of CompareMeans metric."""
+    return await _list_compare_means_requests(METRIC_NAME)
 
 
 # ============================================================================
@@ -415,7 +436,9 @@ async def schedule_meanshift(request: MeanshiftMetricRequest) -> dict[str, str]:
     compare_means_request = CompareMeansMetricRequest.model_validate(
         request.model_dump(exclude_none=True)
     )
-    return await schedule_compare_means(compare_means_request)
+    return await _schedule_compare_means(
+        compare_means_request, DEPRECATED_METRIC_NAME
+    )
 
 
 @router.delete(routes.DRIFT_MEANSHIFT.request, deprecated=True)
@@ -426,7 +449,7 @@ async def delete_meanshift_schedule(schedule: ScheduleId) -> dict[str, str]:
     /metrics/drift/comparemeans/request instead.
     """
     log_deprecated_endpoint(logger, DEPRECATED_METRIC_NAME, METRIC_NAME)
-    return await delete_compare_means_schedule(schedule)
+    return await _delete_compare_means_schedule(schedule, DEPRECATED_METRIC_NAME)
 
 
 @router.get(routes.DRIFT_MEANSHIFT.requests, deprecated=True)
@@ -437,7 +460,7 @@ async def list_meanshift_requests() -> dict[str, list[dict[str, Any]]]:
     /metrics/drift/comparemeans/requests instead.
     """
     log_deprecated_endpoint(logger, DEPRECATED_METRIC_NAME, METRIC_NAME)
-    return await list_compare_means_requests()
+    return await _list_compare_means_requests(DEPRECATED_METRIC_NAME)
 
 
 async def calculate_compare_means_metric(
@@ -472,10 +495,13 @@ def _register_compare_means_calculator() -> None:
     """Register the CompareMeans calculator with the metrics directory."""
     scheduler = get_prometheus_scheduler()
     if scheduler and scheduler.metrics_directory:
-        scheduler.metrics_directory.register(
-            METRIC_NAME, calculate_compare_means_metric
-        )
-        logger.info("%s calculator registered with metrics directory", METRIC_NAME)
+        for metric_name in (METRIC_NAME, DEPRECATED_METRIC_NAME):
+            scheduler.metrics_directory.register(
+                metric_name, calculate_compare_means_metric
+            )
+            logger.info(
+                "%s calculator registered with metrics directory", metric_name
+            )
 
 
 try:
