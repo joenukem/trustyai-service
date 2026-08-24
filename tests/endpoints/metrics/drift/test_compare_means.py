@@ -12,6 +12,8 @@ from trustyai_service.core.metrics.drift.compare_means import DEFAULT_ALPHA
 from trustyai_service.endpoints import routes
 from trustyai_service.endpoints.metrics.drift.compare_means import (
     CompareMeansMetricRequest,
+    DEPRECATED_METRIC_NAME,
+    MeanshiftMetricRequest,
     router,
 )
 
@@ -654,6 +656,52 @@ class TestCompareMeansEndpoints:
             )
             data = response.json()
             assert "requestId" in data
+
+    def test_deprecated_schedule_preserves_metric_identity(self) -> None:
+        """Legacy schedule, list, and delete operations use the Meanshift namespace."""
+        request_id = "123e4567-e89b-12d3-a456-426614174000"
+        request = MeanshiftMetricRequest(
+            modelId="test-model",
+            referenceTag="baseline",
+            fitColumns=["feature1"],
+        )
+        mock_scheduler = MagicMock()
+        mock_scheduler.register = AsyncMock(return_value=None)
+        mock_scheduler.delete = AsyncMock(return_value=None)
+        mock_scheduler.get_requests.return_value = {request_id: request}
+
+        with (
+            patch(
+                "trustyai_service.endpoints.metrics.drift.compare_means.get_prometheus_scheduler",
+                return_value=mock_scheduler,
+            ),
+            patch(
+                "trustyai_service.endpoints.metrics.drift.compare_means.validate_drift_request",
+                new=AsyncMock(return_value=["feature1"]),
+            ),
+        ):
+            response = client.post(
+                routes.DRIFT_MEANSHIFT.request,
+                json=request.model_dump(by_alias=True),
+            )
+            assert response.status_code == HTTPStatus.OK
+            registered = mock_scheduler.register.await_args.args
+            assert registered[0] == DEPRECATED_METRIC_NAME
+            assert registered[2].metric_name == DEPRECATED_METRIC_NAME
+
+            response = client.get(routes.DRIFT_MEANSHIFT.requests)
+            assert response.status_code == HTTPStatus.OK
+            assert response.json()["requests"][0]["metricName"] == DEPRECATED_METRIC_NAME
+            mock_scheduler.get_requests.assert_called_once_with(DEPRECATED_METRIC_NAME)
+
+            response = client.request(
+                "DELETE",
+                routes.DRIFT_MEANSHIFT.request,
+                json={"requestId": request_id},
+            )
+            assert response.status_code == HTTPStatus.OK
+            deleted = mock_scheduler.delete.await_args.args
+            assert deleted[0] == DEPRECATED_METRIC_NAME
 
     # ========================================================================
     # CompareMeansMetricRequest.retrieve_tags() Tests
