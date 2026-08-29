@@ -359,6 +359,11 @@ def get_tls_config() -> dict[str, Any] | None:
     return None
 
 
+def get_http_bind_host() -> str:
+    """Return the interface for the plain HTTP application/metrics listener."""
+    return os.getenv("HTTP_BIND_HOST", "127.0.0.1")
+
+
 async def run_server() -> None:
     """Run hypercorn server with both HTTP and HTTPS binds."""
     # Get TLS configuration
@@ -366,9 +371,10 @@ async def run_server() -> None:
 
     # Configure server settings
     host_https = "0.0.0.0"  # noqa: S104  # intentional: Kubernetes service binding
-    host_http = (
-        "127.0.0.1"  # Keep loopback-only for security (kube-rbac-proxy forwards here)
-    )
+    # The operator sets HTTP_BIND_HOST=0.0.0.0 because the Kubernetes
+    # metrics-http Service targets this listener directly. Keep loopback as
+    # the standalone default so local deployments remain least-privileged.
+    host_http = get_http_bind_host()
     http_port = int(os.getenv("HTTP_PORT", "8081"))
     ssl_port = int(os.getenv("SSL_PORT", "4443"))
     health_port = int(os.getenv("HEALTH_PORT", "8080"))
