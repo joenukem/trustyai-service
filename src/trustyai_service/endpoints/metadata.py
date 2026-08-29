@@ -517,6 +517,10 @@ async def apply_column_names(name_mapping: NameMapping) -> dict[str, str]:
             detail=f"Error applying column names: {e!s}",
         ) from e
     else:
+        # Name mappings change the schema returned by DataSource.column_names().
+        # Drop the shared metadata snapshot so schedulers created after this
+        # request derive fitColumns from the aliased (human-readable) names.
+        get_data_source().metadata_cache.pop(model_id, None)
         logger.info("Name mappings successfully applied to model=%s", model_id)
         return {"message": "Feature and output name mapping successfully applied."}
 

@@ -37,6 +37,28 @@ class TestApplyColumnNames:
         assert "successfully applied" in response.json()["message"]
         assert mock_storage.apply_name_mapping.call_count == 2  # noqa: PLR2004
 
+    @patch("trustyai_service.endpoints.metadata.get_shared_data_source")
+    @patch("trustyai_service.endpoints.metadata.storage_interface")
+    @pytest.mark.asyncio
+    async def test_apply_mapping_invalidates_cached_schema(
+        self, mock_storage: MagicMock, mock_shared_data_source: MagicMock
+    ) -> None:
+        """A mapping update cannot leave the scheduler using the old schema."""
+        mock_storage.dataset_exists = AsyncMock(return_value=True)
+        mock_storage.get_original_column_names = AsyncMock(return_value=["input-0"])
+        mock_storage.apply_name_mapping = AsyncMock()
+        data_source = MagicMock()
+        data_source.metadata_cache = {"test-model": object()}
+        mock_shared_data_source.return_value = data_source
+
+        response = client.post(
+            routes.INFO_NAMES,
+            json={"modelId": "test-model", "inputMapping": {"input-0": "tenure_months"}},
+        )
+
+        assert response.status_code == 200  # noqa: PLR2004
+        assert "test-model" not in data_source.metadata_cache
+
     @patch("trustyai_service.endpoints.metadata.storage_interface")
     @pytest.mark.asyncio
     async def test_apply_invalid_input_column(self, mock_storage: MagicMock) -> None:
