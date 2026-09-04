@@ -92,6 +92,7 @@ class TestPrometheusPublisher:
         expected_labels.extend(
             list(mock_request.retrieve_tags().keys()),
         )  # custom tags (custom_tag)
+        expected_labels.append("model")  # legacy PromQL model label
         expected_labels.append("request")  # request id (request)
 
         gauge: Gauge = cast(
@@ -122,7 +123,8 @@ class TestPrometheusPublisher:
         assert test_named_values["feature1"] in publisher.values.values()
         assert test_named_values["feature2"] in publisher.values.values()
 
-        # Verify gauge is created with subcategory label
+        # Verify the gauge preserves its generic subcategory label and exposes
+        # compatibility aliases used by per-feature drift alerting rules.
         metric_name = f"{PROMETHEUS_METRIC_PREFIX}{mock_request.metric_name}"
         gauge: Gauge = cast(
             "Gauge",
@@ -130,12 +132,18 @@ class TestPrometheusPublisher:
         )
 
         assert "subcategory" in gauge._labelnames
+        assert "feature" in gauge._labelnames
+        assert "model" in gauge._labelnames
 
         subcategory_value_map = {}
+        feature_value_map = {}
         for metric in gauge.collect():
             for sample in metric.samples:
                 subcategory_value_map[sample.labels["subcategory"]] = sample.value
+                feature_value_map[sample.labels["feature"]] = sample.value
+                assert sample.labels["model"] == "test_model"
         assert subcategory_value_map == test_named_values
+        assert feature_value_map == test_named_values
 
     def test_simple_gauge_without_request(self, publisher: PrometheusPublisher) -> None:
         """Test publishing simple gauge without request object."""
@@ -273,6 +281,7 @@ class TestPrometheusPublisher:
             "modelId": "test_model",
             "requestName": mock_request.request_name,
             "custom_tag": "custom_value",
+            "model": "test_model",
             "request": str(test_id),
         }
 

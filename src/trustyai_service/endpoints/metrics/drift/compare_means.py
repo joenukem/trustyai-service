@@ -476,7 +476,15 @@ async def calculate_compare_means_metric(
                 equal_var=equal_var,
                 nan_policy=nan_policy,
             )
-            named_values[feature_name] = result["statistic"]
+            # The deprecated MeanShift metric historically exposed p-values,
+            # where drift means a value below alpha.  Keep modern CompareMeans
+            # on its t-statistic while preserving the legacy alerting contract.
+            value_key = (
+                "p_value"
+                if request.metric_name == DEPRECATED_METRIC_NAME
+                else "statistic"
+            )
+            named_values[feature_name] = result[value_key]
     return MetricValueCarrier(named_values or 0.0)
 
 

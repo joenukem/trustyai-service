@@ -122,8 +122,10 @@ class PrometheusPublisher:
         if request is not None:
             tags.update(request.retrieve_default_tags())
             tags.update(request.retrieve_tags())
-        elif model_name:
-            tags["model"] = model_name
+        if model_name:
+            # Keep modelId as the canonical API-shaped label while also exposing
+            # the legacy Prometheus label used by existing alerting rules.
+            tags.setdefault("model", model_name)
 
         tags["request"] = str(request_id)
         return tags
@@ -174,6 +176,10 @@ class PrometheusPublisher:
                         request=config.request,
                     )
                     tags["subcategory"] = key
+                    # Named drift results are per-feature values.  Retain the
+                    # generic subcategory label and add the established feature
+                    # alias so existing PromQL can select individual columns.
+                    tags["feature"] = key
                     self._create_or_update_gauge(
                         name=full_metric_name, tags=tags, request_id=new_id
                     )

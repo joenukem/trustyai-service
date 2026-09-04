@@ -21,12 +21,14 @@ def _make_request(
     model_id: str = "test-model",
     reference_tag: str = "TRAINING",
     fit_columns: list[str] | None = None,
+    metric_name: str = "CompareMeans",
 ) -> MagicMock:
     """Create a mock metric request."""
     request = MagicMock()
     request.model_id = model_id
     request.reference_tag = reference_tag
     request.fit_columns = fit_columns or []
+    request.metric_name = metric_name
     request.alpha = 0.05
     request.equal_var = True
     request.nan_policy = "omit"
@@ -70,6 +72,25 @@ class TestCompareMeansCalculator:
         assert "feature1" in named
         assert "feature2" in named
         assert isinstance(named["feature1"], float)
+        assert named["feature1"] == pytest.approx(0.0)
+        assert named["feature2"] == pytest.approx(0.0)
+
+    @patch("trustyai_service.endpoints.metrics.drift.compare_means.get_data_source")
+    @pytest.mark.asyncio
+    async def test_publishes_low_p_value_for_shifted_feature(
+        self, mock_get_ds: MagicMock
+    ) -> None:
+        """Scheduled CompareMeans values retain the documented drift threshold."""
+        ref_df = pd.DataFrame({"feature1": [0.0, 1.0] * 25})
+        cur_df = pd.DataFrame({"feature1": [10.0, 11.0] * 25})
+        mock_ds = MagicMock()
+        mock_ds.get_dataframe_by_tag = AsyncMock(return_value=ref_df)
+        mock_get_ds.return_value = mock_ds
+
+        request = _make_request(fit_columns=["feature1"], metric_name="Meanshift")
+        result = await calculate_compare_means_metric(cur_df, request)
+
+        assert result.get_named_values()["feature1"] < request.alpha
 
     @patch("trustyai_service.endpoints.metrics.drift.compare_means.get_data_source")
     @pytest.mark.asyncio
